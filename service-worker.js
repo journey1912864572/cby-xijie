@@ -1,4 +1,4 @@
-const CACHE_NAME = "anatomy-quiz-pro-v8";
+const CACHE_NAME = "anatomy-quiz-pro-v10";
 const CORE_ASSETS = [
   "./",
   "./index.html",

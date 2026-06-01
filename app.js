@@ -1,6 +1,7 @@
 const APP = {
   storageKey: "anatomy-quiz-pro-state-v1",
   authKey: "anatomy-quiz-pro-auth-v1",
+  wrongKey: "wrongQuestions",
   codeSalt: 23,
   codeCipher: [84, 85, 78, 93, 67, 84, 68, 90],
 };
@@ -11,10 +12,13 @@ const state = {
   inputs: {},
   results: {},
   submitted: {},
+  mode: "full",
+  wrongIndex: 0,
 };
 
 const app = document.querySelector("#app");
 const fireworksCanvas = document.querySelector("#fireworks");
+let fireworksToken = 0;
 
 document.addEventListener("DOMContentLoaded", init);
 
@@ -37,6 +41,7 @@ function isAuthed() {
 }
 
 function renderAuth() {
+  stopFireworks();
   app.className = "auth-page";
   app.innerHTML = `
     <section class="auth-card">
@@ -78,7 +83,24 @@ async function loadQuiz() {
 }
 
 function renderQuiz() {
+  stopFireworks();
   const question = currentQuestion();
+  const questions = activeQuestions();
+  if (!question) {
+    state.mode = "full";
+    state.wrongIndex = 0;
+    renderScore();
+    return;
+  }
+  const currentNumber = state.mode === "wrong" ? state.wrongIndex + 1 : state.index + 1;
+  const totalNumber = questions.length;
+  const modeText = state.mode === "wrong" ? "错题练习" : "当前题目";
+  const progressText = state.mode === "wrong"
+    ? `错题 ${currentNumber} / ${totalNumber}`
+    : `已完成 ${completedCount()} / ${state.data.totalQuestions}`;
+  const progressValue = state.mode === "wrong"
+    ? ((state.wrongIndex + 1) / Math.max(totalNumber, 1)) * 100
+    : (completedCount() / state.data.totalQuestions) * 100;
   app.className = "app-shell";
   app.innerHTML = `
     <header class="topbar">
@@ -97,15 +119,15 @@ function renderQuiz() {
       </div>
       <aside class="side-panel">
         <div class="meta-row">
-          <span>当前题目</span>
-          <strong>${state.index + 1} / ${state.data.totalQuestions}</strong>
+          <span>${modeText}</span>
+          <strong>${currentNumber} / ${totalNumber}</strong>
         </div>
         <h2 class="question-title">${question.title}</h2>
         <div class="meta-row">
-          <span>已完成 ${completedCount()} / ${state.data.totalQuestions}</span>
-          <span>${Math.round((completedCount() / state.data.totalQuestions) * 100)}%</span>
+          <span>${progressText}</span>
+          <span>${Math.round(progressValue)}%</span>
         </div>
-        <div class="progress-track"><div class="progress-fill" style="width:${(completedCount() / state.data.totalQuestions) * 100}%"></div></div>
+        <div class="progress-track"><div class="progress-fill" style="width:${progressValue}%"></div></div>
         <div id="feedback" class="feedback">${feedbackHtml(question)}</div>
         <div class="action-grid">
           <button id="submitBtn" class="primary-btn" type="button">提交本题</button>
@@ -159,18 +181,18 @@ function bindQuizEvents() {
     });
   });
   document.querySelector("#submitBtn").addEventListener("click", submitCurrent);
-  document.querySelector("#prevBtn").addEventListener("click", () => goTo(state.index - 1));
+  document.querySelector("#prevBtn").addEventListener("click", () => goTo(currentQuestionIndex() - 1));
   document.querySelector("#nextBtn").addEventListener("click", () => {
-    if (state.index === state.data.questions.length - 1 && completedCount() === state.data.questions.length) {
+    if (state.mode === "full" && state.index === state.data.questions.length - 1 && completedCount() === state.data.questions.length) {
       renderScore();
       return;
     }
-    goTo(state.index + 1);
+    goTo(currentQuestionIndex() + 1);
   });
   document.querySelector("#scoreBtn").addEventListener("click", renderScore);
   document.querySelector("#scoreBtn").disabled = completedCount() !== state.data.totalQuestions;
-  document.querySelector("#prevBtn").disabled = state.index === 0;
-  document.querySelector("#nextBtn").disabled = state.index === state.data.questions.length - 1 && completedCount() !== state.data.questions.length;
+  document.querySelector("#prevBtn").disabled = currentQuestionIndex() === 0;
+  document.querySelector("#nextBtn").disabled = currentQuestionIndex() === activeQuestions().length - 1 && (state.mode === "wrong" || completedCount() !== state.data.questions.length);
   primeBlankPositions();
   window.removeEventListener("resize", positionBlanks);
   window.addEventListener("resize", positionBlanks);
@@ -222,13 +244,26 @@ function submitCurrent() {
   const question = currentQuestion();
   const values = state.inputs[question.id] ?? {};
   state.results[question.id] = {};
+  let hasError = false;
   for (const blank of question.blanks) {
     const ok = normalize(values[blank.id] ?? "") === normalize(blank.answer);
     state.results[question.id][blank.id] = ok;
+    if (!ok) hasError = true;
   }
   state.submitted[question.id] = true;
+  updateWrongQuestion(question.id, hasError);
   saveState();
-  if (completedCount() === state.data.questions.length) {
+  if (state.mode === "wrong") {
+    const questions = activeQuestions();
+    if (!questions.length) {
+      state.mode = "full";
+      state.wrongIndex = 0;
+      renderScore();
+      return;
+    }
+    state.wrongIndex = clamp(state.wrongIndex, 0, questions.length - 1);
+    renderQuiz();
+  } else if (completedCount() === state.data.questions.length) {
     renderScore();
   } else {
     renderQuiz();
@@ -251,6 +286,8 @@ function renderScore() {
   const score = calculateScore();
   const percent = score.total ? score.correct / score.total : 0;
   const comment = scoreComment(percent);
+  const wrongQuestions = readWrongQuestions();
+  const wrongDisabled = wrongQuestions.length === 0;
   app.className = "app-shell score-page";
   app.innerHTML = `
     <section class="score-panel">
@@ -266,18 +303,27 @@ function renderScore() {
       </div>
       <div class="action-grid">
         <button id="backBtn" class="secondary-btn" type="button">返回答题</button>
+        <button id="wrongPracticeBtn" class="secondary-btn" type="button" ${wrongDisabled ? "disabled" : ""}>${wrongDisabled ? "暂无错题" : "练习错题"}</button>
+        <button id="clearWrongBtn" class="secondary-btn danger-btn" type="button" ${wrongDisabled ? "disabled" : ""}>清空错题记录</button>
         <button id="restartBtn" class="primary-btn" type="button">重新开始</button>
       </div>
     </section>
     <div class="blessing">儿童节快乐亲爱的医生们 ^^</div>
   `;
   document.querySelector("#backBtn").addEventListener("click", renderQuiz);
+  document.querySelector("#wrongPracticeBtn").addEventListener("click", startWrongPractice);
+  document.querySelector("#clearWrongBtn").addEventListener("click", () => {
+    writeWrongQuestions([]);
+    renderScore();
+  });
   document.querySelector("#restartBtn").addEventListener("click", () => {
     localStorage.removeItem(APP.storageKey);
     state.index = 0;
     state.inputs = {};
     state.results = {};
     state.submitted = {};
+    state.mode = "full";
+    state.wrongIndex = 0;
     renderQuiz();
   });
   startFireworks();
@@ -314,11 +360,26 @@ function scoreComment(percent) {
 }
 
 function currentQuestion() {
-  return state.data.questions[state.index];
+  return activeQuestions()[currentQuestionIndex()];
+}
+
+function currentQuestionIndex() {
+  return state.mode === "wrong" ? state.wrongIndex : state.index;
+}
+
+function activeQuestions() {
+  if (state.mode !== "wrong") return state.data.questions;
+  const wrongIds = new Set(readWrongQuestions());
+  return state.data.questions.filter((question) => wrongIds.has(question.id));
 }
 
 function goTo(nextIndex) {
-  state.index = clamp(nextIndex, 0, state.data.questions.length - 1);
+  const maxIndex = Math.max(activeQuestions().length - 1, 0);
+  if (state.mode === "wrong") {
+    state.wrongIndex = clamp(nextIndex, 0, maxIndex);
+  } else {
+    state.index = clamp(nextIndex, 0, maxIndex);
+  }
   saveState();
   renderQuiz();
 }
@@ -334,6 +395,37 @@ function saveState() {
     results: state.results,
     submitted: state.submitted,
   }));
+}
+
+function readWrongQuestions() {
+  try {
+    const ids = JSON.parse(localStorage.getItem(APP.wrongKey) || "[]");
+    return Array.isArray(ids) ? ids.filter((id) => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeWrongQuestions(ids) {
+  const validIds = new Set(state.data?.questions?.map((question) => question.id) ?? []);
+  const uniqueIds = [...new Set(ids)].filter((id) => validIds.has(id));
+  localStorage.setItem(APP.wrongKey, JSON.stringify(uniqueIds));
+}
+
+function updateWrongQuestion(qid, hasError) {
+  const ids = readWrongQuestions();
+  if (hasError) {
+    writeWrongQuestions([...ids, qid]);
+  } else {
+    writeWrongQuestions(ids.filter((id) => id !== qid));
+  }
+}
+
+function startWrongPractice() {
+  if (!readWrongQuestions().length) return;
+  state.mode = "wrong";
+  state.wrongIndex = 0;
+  renderQuiz();
 }
 
 function readState() {
@@ -371,6 +463,8 @@ function registerServiceWorker() {
 }
 
 function startFireworks() {
+  fireworksToken += 1;
+  const token = fireworksToken;
   const ctx = fireworksCanvas.getContext("2d");
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   const particles = [];
@@ -421,9 +515,19 @@ function startFireworks() {
       if (p.life <= 0) particles.splice(i, 1);
     }
     ctx.globalAlpha = 1;
+    if (token !== fireworksToken) {
+      ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      return;
+    }
     if (elapsed < 7600 || particles.length) requestAnimationFrame(tick);
     else ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
   }
 
   requestAnimationFrame(tick);
+}
+
+function stopFireworks() {
+  fireworksToken += 1;
+  const ctx = fireworksCanvas?.getContext("2d");
+  if (ctx) ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 }

@@ -158,6 +158,11 @@ button:disabled {
   background: #eef1f5;
 }
 
+.danger-btn {
+  color: var(--bad);
+  background: var(--bad-bg);
+}
+
 .ghost-btn {
   color: var(--muted);
   background: transparent;
