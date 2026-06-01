@@ -16,7 +16,7 @@ python -m http.server 8080
 http://localhost:8080
 ```
 
-默认邀请码：`HXKQ2026`
+默认邀请码：`CBYJTCSM`
 
 ## 部署到 GitHub Pages
 
@@ -44,7 +44,7 @@ http://localhost:8080
 ```js
 const APP = {
   codeSalt: 23,
-  codeCipher: [95, 79, 92, 70, 37, 39, 37, 33],
+  codeCipher: [84, 85, 78, 93, 67, 84, 68, 90],
 };
 ```
 

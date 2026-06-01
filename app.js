@@ -2,7 +2,7 @@ const APP = {
   storageKey: "anatomy-quiz-pro-state-v1",
   authKey: "anatomy-quiz-pro-auth-v1",
   codeSalt: 23,
-  codeCipher: [95, 79, 92, 70, 37, 39, 37, 33],
+  codeCipher: [84, 85, 78, 93, 67, 84, 68, 90],
 };
 
 const state = {
